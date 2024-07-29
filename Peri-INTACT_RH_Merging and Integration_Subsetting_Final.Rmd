@@ -1,0 +1,447 @@
+---
+title: "Peri-INTACT GFP Integration"
+author: "Jonathan Nelson"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document: 
+    toc: yes
+    toc_depth: 3
+    toc_float: true
+    number_sections: yes
+    theme: bootstrap
+    df_print: paged
+    code_folding: hide
+    highlight: pygments
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load Packages
+
+```{r load new packages, echo=TRUE, error=FALSE, message=FALSE, warning=FALSE}
+
+if (!require("knitr")) {install.packages("knitr"); require("knitr")}
+if (!requireNamespace('BiocManager', quietly = TRUE)) {install.packages('BiocManager'); require("BiocManager")}
+if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
+if (!require("stringr")) {install.packages("stringr"); require("stringr")}
+if (!require("Seurat")) {install.packages("Seurat"); require("Seurat")}
+if (!require("sctransform")) {install.packages("sctransform"); require("sctransform")}
+if (!require("glmGamPoi")) {BiocManager::install('glmGamPoi'); require("glmGamPoi")}
+if (!require("patchwork")) {install.packages("patchwork"); require("patchwork")}
+if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("EnhancedVolcano")) {BiocManager::install('EnhancedVolcano'); require("EnhancedVolcano")}
+if (!require("DESeq2")) {BiocManager::install('DESeq2'); require("DESeq2")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
+if (!require("RColorBrewer")) {install.packages("RColorBrewer"); require("RColorBrewer")}
+if (!require("car")) {install.packages("car"); require("car")}
+if (!require("openxlsx")) {install.packages("openxlsx"); require("openxlsx")}
+if (!require("readxl")) {install.packages("readxl"); require("readxl")}
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+if (!require("gghighlight")) {install.packages("gghighlight"); require("gghighlight")}
+if (!require("ggpmisc")) {install.packages("ggpmisc"); require("ggpmisc")}
+if (!require("data.table")) {install.packages("data.table"); require("data.table")}
+if (!require("here")) {install.packages("here"); require("here")}
+```
+
+# Loading Filtered Seurat Object
+These files are post-DoubletFinder.
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+One <- readRDS(here("Outputs", "951_260724.rds"))
+Two <- readRDS(here("Outputs", "3246_260724.rds"))
+
+One <- AddMetaData(object = One, metadata = "951", col.name = "Sample") #Change
+Two <- AddMetaData(object = Two, metadata = "3246", col.name = "Sample") #Change
+
+```
+
+# Nuclei Entering the Analysis Pipeline
+The following shows the number of nuclei post-QC and post-DoubletFinder. Numbers in `# (10X Count)` are the starting numbers for reference.  
+Values appear in the Environment when running the `rmd`.
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+One.nuc <- nrow(One@meta.data) # 10040 (10X Count)
+One.nuc
+Two.nuc <- nrow(Two@meta.data) # 11725 (10X Count)
+Two.nuc
+```
+
+# Merging Replicates
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+GFPcombined <- merge(One, y = c(Two), project = "Peri-INTACT GFP")
+
+```
+
+## Nuclei Filtering and Batch Comparison
+
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+
+head(GFPcombined@meta.data)
+
+VlnPlot(GFPcombined, 
+        features = c("nCount_RNA", "nFeature_RNA", "percent.mt"),
+        group.by = "Sample")
+
+GFPcombined <- subset(GFPcombined,
+                                  nFeature_RNA < 10000 &
+                                  nCount_RNA > 1000 &
+                                  nCount_RNA < 10000) 
+
+VlnPlot(GFPcombined, 
+        features = c("nCount_RNA", "nFeature_RNA", "percent.mt"),
+        group.by = "Sample")
+
+VlnPlot(GFPcombined, 
+        features = c("nCount_RNA", "nFeature_RNA", "percent.mt"),
+        group.by = "Sample", pt.size = 0)
+
+
+GFPcombined
+
+```
+
+
+## Data Normalization
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.show='hide', fig.align = 'center'}
+
+GFPcombined <- SCTransform(GFPcombined, method = "glmGamPoi", vars.to.regress = c("nCount_RNA"), verbose = TRUE)
+
+```
+
+## Principal Component Analysis
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+GFPcombined <- RunPCA(GFPcombined, verbose = TRUE)
+ElbowPlot(GFPcombined, ndims = 50)
+```
+
+## Dataset Integration
+- Normalize datasets individually by `SCTransform()`, instead of `NormalizeData()` prior to integration.  
+- Use 3,000 or more features for analysis downstream of `sctransform`.  
+- Run the `PrepSCTIntegration()` function prior to identifying anchors.  
+- When running `FindIntegrationAnchors()`, and `IntegrateData()`, set the normalization.method parameter to the value `SCT`.  
+- When running sctransform-based workflows, including integration, **do not** run the `ScaleData()` function.
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.align = 'center'}
+
+GFPcombined.list <- SplitObject(GFPcombined, split.by = "Sample")
+
+GFPcombined.list <- lapply(X = GFPcombined.list, FUN = SCTransform)
+
+features <- SelectIntegrationFeatures(object.list = GFPcombined.list, nfeatures = 3000)
+
+GFPcombined.list <- PrepSCTIntegration(object.list = GFPcombined.list, anchor.features = features)
+
+anchors <- FindIntegrationAnchors(object.list = GFPcombined.list,
+                                  reduction = "rpca",
+                                  normalization.method = "SCT",
+                                  anchor.features = features)
+
+GFPcombined <- IntegrateData(anchorset = anchors,
+                          normalization.method = "SCT")
+
+rm(anchors, One, Two)
+
+```
+
+## UMAP Visualization and Tables
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.align = 'center'}
+
+DefaultAssay(GFPcombined) <- "integrated"
+
+GFPcombined <- RunPCA(GFPcombined, verbose = FALSE)
+GFPcombined <- RunUMAP(GFPcombined, dims = 1:50)
+ 
+GFPcombined <- FindNeighbors(GFPcombined, reduction = "pca", dims = 1:50)
+GFPcombined <- FindClusters(GFPcombined, resolution = 3.0)
+
+DimPlot(GFPcombined, reduction = "umap", label = TRUE)
+
+DimPlot(GFPcombined, reduction = "umap", group.by = "Sample")
+
+DimPlot(GFPcombined, reduction = "umap", split.by = "Sample")
+
+
+f1 <- DimPlot(GFPcombined,
+              reduction = "umap",
+              label = TRUE,
+              pt.size = 0,
+              label.size = 3) +
+              NoLegend()
+
+
+f3 <- VlnPlot(GFPcombined, 
+        features = c("nCount_RNA", "nFeature_RNA", "percent.mt"),
+        fill.by = "ident",
+        stack = TRUE, 
+        flip = TRUE,
+        pt.size = 0) +
+ theme(legend.position = "none", 
+        plot.title = element_text(hjust = 0.5), 
+        axis.text.x = element_text(angle = 0, hjust = .5),
+        axis.title.x = element_blank()) +
+  stat_summary(fun = median,
+        geom = "crossbar",
+        width = 0.3,
+        size = 0.2,
+        position = position_dodge(width = 0.5))
+
+f1 + f3
+
+FeaturePlot(GFPcombined,
+             features = c("nCount_RNA", "nFeature_RNA", "percent.mt"),
+             cols = c("lightgrey", "royal blue"),
+             ncol = 3)
+
+table(GFPcombined$Sample)
+
+table(Idents(GFPcombined))
+
+table(Idents(GFPcombined), GFPcombined$Sample)
+
+```
+## Save Intermediate Objects
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+saveRDS(GFPcombined, here("Outputs", "GFPcombined.072624.rds"))
+
+GFPcombined <- readRDS(here("Outputs", "GFPcombined.072624.rds"))
+
+```
+
+# QC the cell populations
+
+## Filter for sample-biased clusters and non-Pdgfrb cells
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.align = 'center', fig.width=16}
+
+table(Idents(GFPcombined), GFPcombined$Sample)
+
+DefaultAssay(GFPcombined) <- "SCT"
+
+markers.to.plot1 <- c("Lrp2",         # PT
+                      "Slc5a12",      # PT-S1
+                      "Slc13a3",      # PT-S2
+                      "Slc16a9",      # PT-S3
+                      "Havcr1",       # Injured PT
+                      "Epha7",        # dTL
+                      "Cryab",        # dTL
+                      "Slc12a1",      # TAL
+                      "Umod",         # TAL, DCT1
+                      "Egf",          # TAL, DCT1,
+                      "Cldn10",       # TAL
+                      "Cldn16",       # TAL
+                      "Nos1",         # MD
+                      "Slc12a3",      # DCT
+                      "Pvalb",        # DCT1
+                      "Slc8a1",       # DCT2, CNT
+                      "Aqp2",         # PC
+                      "Slc4a1",       # IC-A
+                      "Slc26a4",      # IC-B
+                      "Nphs1",        # Podo
+                      "Flt1",         # Endo
+                      "Emcn",         # Glom Endo
+                      "Kdr",          # Capillary Endo
+                      "Pdgfrb",       # Perivascular
+                      "Pdgfra",       # Fib
+                      "Piezo2",       # Mesangial
+                      "Acta2",        # Mural
+                      "Ptprc",        # Immune
+                      "Top2a"         # Proliferation
+                      )
+
+DimPlot(GFPcombined, reduction = "umap", label = TRUE)
+
+DotPlot(GFPcombined,
+        features = markers.to.plot1,
+        dot.scale = 8,
+        dot.min = 0,
+        scale.max = 100,
+        scale.min = 0,
+        col.min = -2.5,
+        col.max = 2.5)+
+  coord_flip()
+
+VlnPlot(GFPcombined, "nFeature_RNA")
+
+```
+
+## Filtering non-Pdgfrb Clusters
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.align = 'center'}
+
+SO <- subset(GFPcombined, idents = c("24", "28", "38", "39", "41", "42", "45", "46", "47", "48", "50"), invert = TRUE)
+
+DimPlot(SO, reduction = "umap", label = TRUE)
+
+#rm(GFPcombined)
+
+table(Idents(SO), SO$Sample)
+
+```
+
+## Reclustering the dataset without doublets
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.align = 'center', fig.width=12}
+
+SO <- SCTransform(object = SO)
+SO <- RunPCA(object = SO)
+SO <- FindNeighbors(object = SO, dims = 1:40)
+SO <- FindClusters(object = SO, resolution = 3)
+SO <- RunUMAP(object = SO, dims = 1:40)
+
+DimPlot(object = SO, reduction = "umap", label = TRUE, repel = T)
+
+table(Idents(SO), SO$Sample)
+
+DotPlot(SO,
+        features = markers.to.plot1,
+        dot.scale = 8,
+        dot.min = 0,
+        scale.max = 100,
+        scale.min = 0,
+        col.min = -2.5,
+        col.max = 2.5)+
+  coord_flip()
+
+VlnPlot(SO, "nFeature_RNA")
+
+```
+
+
+## Annotating the dataset
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.align = 'center'}
+
+
+SO <- SO
+SO@meta.data <- SO@meta.data %>% 
+  mutate(class.Merge = dplyr::case_when(
+    seurat_clusters == 0  ~ "Fibroblasts",
+    seurat_clusters == 1  ~ "Fibroblasts",
+    seurat_clusters == 2  ~ "Fibroblasts",
+    seurat_clusters == 3  ~ "Fibroblasts",
+    seurat_clusters == 4  ~ "Fibroblasts",
+    seurat_clusters == 5  ~ "Fibroblasts",
+    seurat_clusters == 6  ~ "Fibroblasts",
+    seurat_clusters == 7  ~ "Fibroblasts",
+    seurat_clusters == 8  ~ "Fibroblasts",
+    seurat_clusters == 9  ~ "Fibroblasts",
+    seurat_clusters == 10 ~ "Fibroblasts",
+    seurat_clusters == 11 ~ "Fibroblasts",
+    seurat_clusters == 12 ~ "Fibroblasts",
+    seurat_clusters == 13 ~ "Fibroblasts",
+    seurat_clusters == 14 ~ "Fibroblasts",
+    seurat_clusters == 15 ~ "Fibroblasts",
+    seurat_clusters == 16 ~ "Pericytes",
+    seurat_clusters == 17 ~ "Fibroblasts",
+    seurat_clusters == 18 ~ "Fibroblasts",
+    seurat_clusters == 19 ~ "Fibroblasts",
+    seurat_clusters == 20 ~ "Fibroblasts",
+    seurat_clusters == 21 ~ "Pericytes",
+    seurat_clusters == 22 ~ "Fibroblasts",
+    seurat_clusters == 23 ~ "Afferent Artery",
+    seurat_clusters == 24 ~ "Fibroblasts",
+    seurat_clusters == 25 ~ "Fibroblasts",
+    seurat_clusters == 26 ~ "Fibroblasts",
+    seurat_clusters == 27 ~ "Efferent Artery",
+    seurat_clusters == 28 ~ "Fibroblasts",
+    seurat_clusters == 29 ~ "Pericytes",
+    seurat_clusters == 30 ~ "Pericytes",
+    seurat_clusters == 31 ~ "Fibroblasts",
+    seurat_clusters == 32 ~ "Medullary Fibroblasts",
+    seurat_clusters == 33 ~ "Fibroblasts",
+    seurat_clusters == 34 ~ "Medullary Fibroblasts",
+    seurat_clusters == 35 ~ "Fibroblasts",
+    seurat_clusters == 36 ~ "JGA",
+    seurat_clusters == 37 ~ "Fibroblasts",
+    seurat_clusters == 38 ~ "Mesangial Cells",
+    seurat_clusters == 39 ~ "Mesangial Cells",
+    seurat_clusters == 40 ~ "Fibroblasts",
+    seurat_clusters == 41 ~ "Efferent Artery",
+    seurat_clusters == 42 ~ "Fibroblasts",
+    seurat_clusters == 43 ~ "Fibroblasts",
+    seurat_clusters == 44 ~ "Proliferating",
+    seurat_clusters == 45 ~ "Fibroblasts"
+    ))
+
+SO@meta.data$class.Merge <- factor(SO@meta.data$class.Merge , levels = c("Fibroblasts", "Medullary Fibroblasts", "Proliferating", "Mesangial Cells", "Pericytes", "Efferent Artery", "Afferent Artery", "JGA"))
+
+
+DimPlot(object = SO, reduction = "umap", group.by = "class.Merge", label = TRUE)
+
+```
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, results = FALSE, message=FALSE, fig.align = 'center'}
+
+
+SO3 <- SO
+
+DefaultAssay(SO3) <- "RNA"
+SO3 <- NormalizeData(object = SO3)
+SO3 <- ScaleData(object = SO3)
+
+markers.to.plot1 <- c("Pdgfrb",
+                      "Pdgfra",
+                      "Cryab",
+                      "Top2a",
+                      "Gata3",
+                      "Cspg4",
+                      "Acta2",
+                      "Adra1a",
+                      "Ren1"
+                            )
+
+DotPlot(SO3,
+        features = markers.to.plot1,
+        dot.scale = 8,
+        dot.min = 0,
+        scale.max = 100,
+        scale.min = 0,
+        col.min = -2.5,
+        col.max = 2.5,
+        scale = FALSE,
+        group.by = "class.Merge") +
+  coord_flip() +
+  theme_classic() +
+  ggtitle("Populations Markers") +
+  theme(axis.line = element_line(size = 1, colour = "black"),
+        axis.ticks.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        text = element_text(size = 20),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5)) +
+  xlab(NULL) +
+  ylab(NULL)
+
+```
+
+# Save Final Object
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+saveRDS(SO3, here("Outputs", "GFPcombined.072824.rds"))
+
+#GFPcombined <- readRDS(here("Outputs", "GFPcombined.072824.rds"))
+
+```
+
+# Session Info
+
+```{r sessioninfo, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+sessionInfo()
+
+```
+

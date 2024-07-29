@@ -1,0 +1,373 @@
+---
+title: "NUC240212JN 3246 Ambient RNA and Doublet Removal"
+author: "Jonathan Nelson"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document: 
+    toc: yes
+    toc_depth: 3
+    toc_float: true
+    number_sections: yes
+    theme: bootstrap
+    df_print: paged
+    code_folding: hide
+    highlight: pygments
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load Packages
+
+```{r load_new_packages, echo=T, error=FALSE, message=FALSE, warning=FALSE}
+
+if (!require("Seurat")) {install.packages("Seurat"); require("Seurat")}
+if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("tidyverse")) {install.packages("tidyverse"); require("tidyverse")}
+if (!require("SoupX")) {install.packages("SoupX"); require("SoupX")}
+if (!require("DoubletFinder")) {BiocManager::install('DoubletFinder'); require("DoubletFinder")}
+if (!require("here")) {install.packages("here"); require("here")}
+#if (!require("remotes")) {install.packages("remotes"); require("remotes")}
+
+#remotes::install_github('chris-mcginnis-ucsf/DoubletFinder')
+
+here()
+```
+
+# Analysis Notes
+
+## 4.12.24
+
+# Experimental Details
+
+This sample contains nuclei were isolated from Pdgfrb-creERT2 INTACT mice on Feb 12th, 2024. Nuclei samples were isolated by Jonathan Nelson and Jessica Bahena Lopez on 2/12/24. Samples were enriched by FANS with Pam Canaday on 2/12/24.
+
+After FANS the nuclei submitted to Alex Klug at the MSPPR core for processing on the 10X Chromium Controller and sequencing. Nuclei were sequenced and FASTQ files were obtained on 2/12/24 and Cell Ranger was run on 4/11/23 by Xiao-Tong Su. 
+
+# Dataset Pre-processing
+
+## SoupX for Ambient RNA Removal
+[Young and Behjati, 2020](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7763177/)
+
+```{r pre_process, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+# Load data and estimate soup profile
+tod = Seurat::Read10X_h5(here("Dataset", "3246_raw_feature_bc_matrix.h5")) #Change
+toc = Seurat::Read10X_h5(here("Dataset", "3246_filtered_feature_bc_matrix.h5")) #Change 
+sc = SoupChannel(tod,toc)
+
+ 
+#Make the Seurat object from the filtered control data
+SO <- Read10X_h5(here("Dataset", "3246_filtered_feature_bc_matrix.h5"))#Change
+SO <- CreateSeuratObject(counts = SO, project = "Peri-INTACT R3")  #Change
+ 
+#Cluster the cells with Seurat
+SO <- SCTransform(SO, verbose = F)
+SO <- RunPCA(SO, verbose = F)
+SO <- RunUMAP(SO, dims = 1:30, verbose = F)
+SO <- FindNeighbors(SO, dims = 1:30, verbose = F)
+SO <- FindClusters(SO, verbose = T)
+ 
+meta <- SO@meta.data
+umap <- SO@reductions$umap@cell.embeddings
+clusters <- setNames(meta$seurat_clusters, rownames(meta))
+
+#Sanity Check
+length(clusters) #should be equal to nrow(sc$metaData)
+nrow(sc$metaData)
+
+sc <- setClusters(sc, clusters)
+sc <- setDR(sc, umap)
+
+#Estimate rho
+sc = autoEstCont(sc)
+
+#Clean the data
+SO_out = adjustCounts(sc)
+ 
+#Create a new Seurat Object out of the cleaned data
+seurat.obj <- CreateSeuratObject(SO_out)
+```
+
+## Pre-process for Doublet Finder
+
+[(McGinnis et al., 2019)](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6853612/)
+
+```{r pre_process2, echo=TRUE, error=FALSE, fig.align= 'center', message=FALSE, warning=FALSE}
+
+seurat.obj
+
+VlnPlot(seurat.obj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+VlnPlot(seurat.obj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0) 
+
+# Minimal QC and Filtering (low quality cells) to let doublet find doublets
+seurat.obj.f <- subset(seurat.obj,
+                                  nFeature_RNA < 10000 &
+                                  nCount_RNA > 1000 &
+                                  nCount_RNA < 10000) 
+seurat.obj.f
+
+VlnPlot(seurat.obj.f, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+VlnPlot(seurat.obj.f, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0) & labs(subtitle = "ViolinPlot After Filtering")
+
+# Pre-process standard workflow
+seurat.obj.f <- NormalizeData(object = seurat.obj.f)
+seurat.obj.f <- FindVariableFeatures(object = seurat.obj.f)
+seurat.obj.f <- ScaleData(object = seurat.obj.f)
+seurat.obj.f <- RunPCA(object = seurat.obj.f)
+ElbowPlot(seurat.obj.f, ndims = 40)
+
+# PCs between 15-20
+seurat.obj.f <- FindNeighbors(object = seurat.obj.f, dims = 1:30)
+seurat.obj.f <- FindClusters(object = seurat.obj.f, resolution = 0.03)
+seurat.obj.f <- RunUMAP(object = seurat.obj.f, dims = 1:30)
+DimPlot(seurat.obj.f, reduction = "umap")
+
+FeaturePlot(seurat.obj.f, features = c("nFeature_RNA"), reduction = "umap") 
+
+
+```
+
+```{r find_parameters_1, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center', results=F}
+
+# Calculate each combination of pN and pK
+sweep.res.list_seurat.obj.f <- paramSweep(seurat.obj.f, PCs = 1:20, sct = FALSE) 
+```
+
+```{r find_parameters_2, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+#Summarize each combination of pN and pK
+sweep.stats_seurat.obj.f <- summarizeSweep(sweep.res.list_seurat.obj.f, GT = FALSE) 
+
+#Select the pK that corresponds to max bcmvn to optimize doublet detection
+bcmvn_seurat.obj.f <- find.pK(sweep.stats_seurat.obj.f)
+pK <- bcmvn_seurat.obj.f %>% 
+  filter(BCmetric == max(BCmetric)) %>%
+  select(pK) 
+
+#See pK in the Values Environment
+pK <- as.numeric(as.character(pK[[1]]))
+
+```
+
+ 
+```{r homotypic_doublets, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+ 
+# Homotypic Doublet Proportion Estimate -------------------------------------------------------------------------------------
+annotations <- seurat.obj.f@meta.data$seurat_clusters  
+ 
+homotypic.prop <- modelHomotypic(annotations)           
+homotypic.prop
+ 
+# 10X Multiplet Rate Table (the doublet ratio is # of cells recovered divided by 125000) https://kb.10xgenomics.com/hc/en-us/articles/360001378811-What-is-the-maximum-number-of-cells-that-can-be-profiled-
+ 
+nrow(seurat.obj.f@meta.data)
+
+nExp_poi <- round(nrow(seurat.obj.f@meta.data) # To calculate cell number
+                  /125000              # To calculate the doublet ratio
+                  *nrow(seurat.obj.f@meta.data))
+nExp_poi
+nExp_poi_adj <- round(nExp_poi*(1-homotypic.prop))
+ 
+```
+
+## Doublet Finder
+
+```{r doublet_finder, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+ 
+seurat.obj.f_doublets <- doubletFinder(seurat.obj.f,
+                        PCs = 1:20,
+                        pN = 0.25,
+                        pK = pK,
+                        nExp = nExp_poi_adj,
+                        reuse.pANN = FALSE, sct = FALSE)
+colnames(seurat.obj.f_doublets@meta.data)[6] <- "pANN"
+colnames(seurat.obj.f_doublets@meta.data)[7] <- "DF.class"
+head(seurat.obj.f_doublets@meta.data)
+table(seurat.obj.f_doublets@meta.data$DF.class)
+
+DimPlot(seurat.obj.f_doublets, group.by = "DF.class")
+
+VlnPlot(seurat.obj.f_doublets, "nFeature_RNA", group.by = "DF.class")
+
+VlnPlot(seurat.obj.f_doublets, "nCount_RNA", group.by = "DF.class")
+
+```
+
+
+### Subset singlets
+
+```{r subset, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+seurat.obj.f_singlets <- subset(seurat.obj.f_doublets, DF.class == "Singlet")
+seurat.obj.f_singlets
+DimPlot(seurat.obj.f_singlets, reduction = "umap")
+```
+
+## Add Meta data
+
+```{r meta data, echo=TRUE, error=FALSE, fig.align= 'center', message=FALSE, warning=FALSE}
+# Create Seurat object and add metadata
+
+seurat.obj.f_singlets <- AddMetaData(object = seurat.obj.f_singlets, metadata = "3246", col.name = "Sample") #Change
+seurat.obj.f_singlets[["percent.mt"]] <- PercentageFeatureSet(seurat.obj.f_singlets, pattern = "^mt-")
+
+head(seurat.obj.f_singlets@meta.data)
+
+```
+
+## Remove Mitochondrial Genes
+
+```{r mito, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+seurat.obj.f_singlets <- seurat.obj.f_singlets[!grepl("^mt-", rownames(seurat.obj.f_singlets)), ]
+
+#Mito Sanity Check
+counts <- GetAssayData(seurat.obj.f_singlets, assay = "RNA")
+mito.genes <- grep(pattern = "^mt-", x = rownames(x = counts), value = TRUE) 
+mito.genes #should be zero
+
+DimPlot(seurat.obj.f_singlets, reduction = "umap", label = T)
+```
+
+# Initial Cluster Identification
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+seurat.obj.f_singlets <- FindClusters(object = seurat.obj.f_singlets, resolution = .3)
+seurat.obj.f_singlets <- RunUMAP(object = seurat.obj.f_singlets, dims = 1:30)
+DimPlot(seurat.obj.f_singlets, reduction = "umap", label = T)
+
+```
+
+# Unbiased Cluster Identification 
+
+```{r cluster1, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center', fig.width = 12, fig.height= 18, cache=TRUE}
+
+# Changed logfc.threshold to .5 to speed up computational time
+seurat.obj.f_singlets.markers <- FindAllMarkers(seurat.obj.f_singlets, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.5)
+
+seurat.obj.f_singlets.markers %>%
+    group_by(cluster) %>%
+    top_n(n = 5, wt = avg_log2FC) -> top5
+
+DoHeatmap(seurat.obj.f_singlets, features = top5$gene) + NoLegend()
+
+seurat.obj.f_singlets.markers %>%
+    group_by(cluster) %>%
+    top_n(n = 2, wt = avg_log2FC) -> top2
+
+VlnPlot(seurat.obj.f_singlets, 
+        features = unique(top2$gene),
+        stack = TRUE, 
+        flip = TRUE,
+        pt.size = 0)+
+        NoLegend()
+
+```
+
+```{r cluster2, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+DotPlot(seurat.obj.f_singlets, features = unique(top2$gene), dot.scale = 8, cols = c("dodgerblue2", "coral2")) + RotatedAxis()
+
+```
+
+## Intermediate Output Files
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+saveRDS(seurat.obj.f_singlets, here("Outputs", "3246_temp.rds")) #Change
+
+#seurat.obj.f_singlets <- readRDS(here("Outputs", "NUC230829RD_RT_Retina_temp.rds"))
+
+```
+
+# Targeted Marker Selection
+
+## From Arjun work on intial dataset
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+
+markers.to.plot.3 <- c("Piezo2", 
+                       "Dlgap1", 
+                       "Coro2a", 
+                       "Abca8a", 
+                       "Kcnd3",
+                       "Ano5",
+                       "6530403H02Rik", 
+                       "Cntn1", 
+                       "Smoc2",
+                       "Itgbl1", 
+                       "Meg3", 
+                       "Tnn", 
+                       "Grem2", 
+                       "Ahrr", 
+                       "Myh11", 
+                       "Slc38a11", 
+                       "Ndst3", 
+                       "Tbx3os1")
+
+for (gene in markers.to.plot.3) {
+  shotgun_plot <- FeaturePlot(seurat.obj.f_singlets, features = gene, cols = c("lightgray", "blue"), pt.size = 1.0, label = TRUE)
+  shotgun_plot <- shotgun_plot + labs(title = paste(gene, "Expression in Subsetted Shotgun Dataset"))
+  print(shotgun_plot)
+}
+
+
+
+```
+
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+DimPlot(seurat.obj.f_singlets, reduction = "umap", label = T)
+
+
+DotPlot(seurat.obj.f_singlets,
+features = markers.to.plot.3,
+dot.scale = 8,
+dot.min = 0,
+scale.max = 100,
+scale.min = 0,
+col.min = -2.5,
+col.max = 2.5)+
+coord_flip()
+
+
+```
+
+```{r , echo=TRUE, error=FALSE, fig.align= 'center', message=FALSE, warning=FALSE, fig.width=14}
+
+FeaturePlot(seurat.obj.f_singlets, "Car8")
+FeaturePlot(seurat.obj.f_singlets, "Vcan")
+
+VlnPlot(seurat.obj.f_singlets, "nFeature_RNA")
+
+seurat.obj.f_singlets
+
+```
+
+## Output Files
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+#Save Seurat Object named with date attached
+
+# Add a date to file name
+date <- format(Sys.Date(), "%d%m%y")
+
+saveRDS(SO, here("Outputs", paste0("3246_", date, ".rds")))
+
+```
+
+# Session Info
+
+```{r  echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, results=T}
+
+sessionInfo()
+
+```
+
+

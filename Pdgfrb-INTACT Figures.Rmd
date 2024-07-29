@@ -1,0 +1,416 @@
+---
+title: "Pdgfrb-INTACT Figures"
+author: "Jonathan Nelson"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document: 
+    toc: yes
+    toc_depth: 3
+    toc_float: true
+    number_sections: yes
+    theme: bootstrap
+    df_print: paged
+    code_folding: hide
+    highlight: pygments
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r load new packages, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+
+if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
+if (!require("Seurat")) {install.packages("Seurat"); require("Seurat")}
+if (!require("patchwork")) {install.packages("patchwork"); require("patchwork")}
+if (!require("knitr")) {install.packages("knitr"); require("knitr")}
+if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("BiocManager")) {install.packages("BiocManager"); require("BiocManager")}
+if (!require("tibble")) {install.packages("tibble"); require("tibble")}
+if (!require("ggpmisc")) {install.packages("ggpmisc"); require("ggpmisc")}
+if (!require("RColorBrewer")) {install.packages("RColorBrewer"); require("RColorBrewer")} #color
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+if (!require("DESeq2")) {BiocManager::install('DESeq2'); require("DESeq2")}
+if (!require("here")) {install.packages("here"); require("here")}
+if (!require("stringr")) {install.packages("stringr"); require("stringr")}
+if (!require("car")) {install.packages("car"); require("car")}
+if (!require("openxlsx")) {install.packages("openxlsx"); require("openxlsx")}
+if (!require("readxl")) {install.packages("readxl"); require("readxl")}
+if (!require("data.table")) {install.packages("data.table"); require("data.table")}
+if (!require("ggvenn")) {install.packages("ggvenn"); require("ggvenn")}
+if (!require("kableExtra")) {install.packages("kableExtra"); require("kableExtra")} # for color brewer
+if (!require("gplots")) {install.packages("gplots"); require("gplots")} # for color brewer
+
+```
+
+
+# Load Dataset
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE}
+
+rm(list = ls())
+
+SO <- readRDS(here("Outputs", "GFPcombined.072824.rds"))
+DefaultAssay(SO) <- "RNA"
+
+head(SO@meta.data)
+
+Idents(SO) <- SO@meta.data$class.Merge
+
+SO@meta.data <- SO@meta.data %>% 
+  mutate(class.Sample = case_when(
+     Sample == "951" ~ "Sample 1",
+     Sample == "3246" ~ "Sample 2",
+))
+
+
+#DimPlot(SO, reduction = "umap")
+
+#DimPlot(SO, group.by = "class.Sample", cols = c("#4974A5", "#B81316"))
+
+#DimPlot(SO, split.by = "class.Sample", label = TRUE)
+
+table(Idents(SO))
+prop.table(table(Idents(SO)))
+
+```
+
+# Set the color palette
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.width=12, fig.height=8}
+
+#custom_colors <- c(
+#  "" = "#4974A5",
+#  "" = "#B81316",
+#  "" = "#45B4A6",
+#  "" = "#B755B6"
+#)
+
+```
+
+
+# Fig 1
+
+## Fig 1C
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.width=10, fig.height=7}
+
+DimPlot(SO, reduction = "umap", pt.size = 1, group.by = "class.Merge") + ggtitle(NULL) & xlab("UMAP 1") & ylab("UMAP 2") +
+  theme_classic() &
+  theme(axis.line = element_line(size = 1, colour = "black"),
+        text = element_text(size=20))
+
+```
+
+## Fig 1D 
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.width=8, fig.height=6}
+
+markers.to.plot1 <- c("Pdgfrb",
+                      "Pdgfra",
+                      "Cryab",
+                      "Top2a",
+                      "Gata3",
+                      "Cspg4",
+                      "Acta2",
+                      "Adra1a",
+                      "Ren1"
+                            )
+
+DotPlot(SO,
+        features = markers.to.plot1,
+        dot.scale = 8,
+        dot.min = 0,
+        scale.max = 100,
+        scale.min = 0,
+        col.min = -2.5,
+        col.max = 2.5,
+        scale = FALSE,
+        group.by = "class.Merge") +
+  coord_flip() +
+  theme_classic() +
+  ggtitle("Populations Markers") +
+  theme(axis.line = element_line(size = 1, colour = "black"),
+        axis.ticks.x = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        text = element_text(size = 20),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5)) +
+  xlab(NULL) +
+  ylab(NULL)
+
+
+
+```
+
+## Fig 1E 
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.width=8, fig.height=6}
+
+
+VlnPlot(SO, features = "Piezo1", group.by = "class.Merge", pt.size = 1) +
+  theme(axis.line = element_line(size = 1, colour = "black"),
+        text = element_text(size=20),
+        axis.text.x = element_text(color = "black", size = 16, angle = 45, hjust = 1, vjust = 1),
+        legend.position = "none"
+        ) + xlab("") 
+
+```
+
+## Fig 1F 
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.width=8, fig.height=6}
+
+
+VlnPlot(SO, features = "Piezo2", group.by = "class.Merge", pt.size = 1) +
+  theme(axis.line = element_line(size = 1, colour = "black"),
+        text = element_text(size=20),
+        axis.text.x = element_text(color = "black", size = 16, angle = 45, hjust = 1, vjust = 1),
+        legend.position = "none"
+        ) + xlab("") 
+
+```
+
+
+
+# Supplemental Fig 1
+
+## Table 1
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.width=12, fig.height=8}
+
+
+table(SO@meta.data$class.Sample)
+
+df <- FetchData(object = SO, vars = c("class.Sample", "nFeature_RNA", "nCount_RNA"), layer = "counts")
+
+df2 <- df %>%
+  group_by(class.Sample) %>%
+  summarize(
+    Count = n(),
+    "Median nFeature_RNA" = median(nFeature_RNA, na.rm = TRUE),
+    "Median nCount_RNA" = median(nCount_RNA, na.rm = TRUE)
+  )
+
+df2
+
+```
+
+## Fig S1A
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.width=14, fig.height=8}
+
+DimPlot(SO, reduction = "umap", pt.size = 1, split.by = "class.Sample", group.by = "class.Merge") & xlab("UMAP 1") & ylab("UMAP 2") +
+  theme_classic() &
+  theme(axis.line = element_line(size = 1, colour = "black"),
+        text = element_text(size=20))
+
+```
+
+
+## Fig S1B
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE}
+
+VlnPlot(SO, features = "nFeature_RNA", group.by = "class.Sample", pt.size = 0.1) +
+  theme_classic() +
+  theme(
+    axis.line = element_line(size = 1, colour = "black"),
+    text = element_text(size = 20),
+    plot.title = element_text(hjust = 0.5),
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  ) +
+  ylab("Number of Genes Detected") +
+  ggtitle("nFeature RNA")
+
+```
+
+## Fig S1B
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE}
+
+VlnPlot(SO, "nCount_RNA", group.by = "class.Sample", pt.size = 0.1) +
+    theme_classic() +
+  theme(
+    axis.line = element_line(size = 1, colour = "black"),
+    text = element_text(size = 20),
+    plot.title = element_text(hjust = 0.5),
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  ) +
+  ylab("Number of mRNA Molecules Detected") +
+  ggtitle("nCount RNA")
+
+```
+
+
+
+## Fig S1C
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE}
+
+VlnPlot(SO, features = "nFeature_RNA", group.by = "class.Merge", pt.size = 0.1) +
+  theme_classic() +
+  theme(
+    axis.line = element_line(size = 1, colour = "black"),
+    text = element_text(size = 20),
+    plot.title = element_text(hjust = 0.5),
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  ) +
+  ylab("Number of Genes Detected") +
+  ggtitle("nFeature RNA")
+
+```
+
+## Fig S1C
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE}
+
+VlnPlot(SO, "nCount_RNA", group.by = "class.Merge", pt.size = 0.1) +
+    theme_classic() +
+  theme(
+    axis.line = element_line(size = 1, colour = "black"),
+    text = element_text(size = 20),
+    plot.title = element_text(hjust = 0.5),
+    axis.title.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  ) +
+  ylab("Number of mRNA Molecules Detected") +
+  ggtitle("nCount RNA")
+
+```
+
+## Fig S1D
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.width=30, fig.height=20}
+
+f5 <- FeaturePlot(SO,
+             features = markers.to.plot1,
+             cols = c("lightgrey", "royal blue"),
+             pt.size = 1,
+             combine = F, 
+             order = T) 
+
+for(i in 1:length(f5)) {
+  f5[[i]] <- f5[[i]] & xlab("UMAP 1") & ylab("UMAP 2") +
+  theme_classic() &
+  theme(axis.line = element_line(size = 1, colour = "black"),
+        text = element_text(size=20))
+}
+
+cowplot::plot_grid(plotlist = f5)
+
+```
+
+## Fig S1E
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.width=30, fig.height=20}
+
+f5 <- VlnPlot(SO,
+             features = markers.to.plot1,
+             pt.size = 1,
+             group.by = "class.Merge"
+             ) 
+
+f5 + theme_classic() &
+  theme(axis.line = element_line(size = 1, colour = "black"),
+        plot.title = element_text(hjust = 0.5, face = "bold", size = 20),
+        text = element_text(size=20),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_text(color = "black", size = 20, angle = 45, hjust = 1, vjust = 1),
+        legend.position = "none"
+        )
+
+```
+
+### VlnPlot of Markers without points
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.width=30, fig.height=20}
+
+f5 <- VlnPlot(SO,
+             features = markers.to.plot1,
+             pt.size = 0,
+             group.by = "class.Merge"
+             ) 
+
+f5 + theme_classic() &
+  theme(axis.line = element_line(size = 1, colour = "black"),
+        plot.title = element_text(hjust = 0.5, face = "bold", size = 20),
+        text = element_text(size=20),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_text(color = "black", size = 20, angle = 45, hjust = 1, vjust = 1),
+        legend.position = "none"
+        )
+
+```
+
+
+# Supplemental Fig 2
+
+## Fig S2A
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.width=12, fig.height=8}
+
+DimPlot(SO, reduction = "umap", pt.size = 1, label = TRUE, label.size = 6, repel = TRUE) + ggtitle(NULL) & xlab("UMAP 1") & ylab("UMAP 2") +
+  theme_classic() &
+  theme(axis.line = element_line(size = 1, colour = "black"),
+        text = element_text(size=20))
+
+```
+
+## Fig S2B
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.width=12, fig.height=8}
+
+FeaturePlot(SO,
+             features = "Piezo1",
+             cols = c("lightgrey", "royal blue"),
+             pt.size = 1,
+             order = T) +
+  theme_classic() &
+  theme(axis.line = element_line(size = 1, colour = "black"),
+        plot.title = element_text(hjust = 0.5, face = "bold", size = 20),
+        text = element_text(size=20),
+        axis.text.x = element_text(color = "black", size = 20, angle = 45, hjust = 1, vjust = 1))
+
+```
+
+## Fig S2C
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.width=12, fig.height=8}
+
+FeaturePlot(SO,
+             features = "Piezo2",
+             cols = c("lightgrey", "royal blue"),
+             pt.size = 1,
+             order = T) +
+  theme_classic() &
+  theme(axis.line = element_line(size = 1, colour = "black"),
+        plot.title = element_text(hjust = 0.5, face = "bold", size = 20),
+        text = element_text(size=20),
+        axis.text.x = element_text(color = "black", size = 20, angle = 45, hjust = 1, vjust = 1))
+
+```
+
+# Session Info
+
+```{r, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE}
+
+sessionInfo()
+
+```
+
+
+  

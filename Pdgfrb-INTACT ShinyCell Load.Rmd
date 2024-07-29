@@ -1,0 +1,159 @@
+---
+title: "Pdgfrb-INTACT Dataset ShinyCell Upload"
+author: "Jonathan Nelson"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document: 
+    toc: yes
+    toc_depth: 3
+    toc_float: true
+    number_sections: yes
+    theme: bootstrap
+    df_print: paged
+    code_folding: hide
+    highlight: pygments
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r load new packages, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+
+if (!require("dplyr")) {install.packages("dplyr"); require("dplyr")}
+if (!require("Seurat")) {install.packages("Seurat"); require("Seurat")}
+if (!require("patchwork")) {install.packages("patchwork"); require("patchwork")}
+if (!require("knitr")) {install.packages("knitr"); require("knitr")}
+if (!require("ggplot2")) {install.packages("ggplot2"); require("ggplot2")}
+if (!require("BiocManager")) {install.packages("BiocManager"); require("BiocManager")}
+if (!require("tibble")) {install.packages("tibble"); require("tibble")}
+if (!require("ggpmisc")) {install.packages("ggpmisc"); require("ggpmisc")}
+if (!require("RColorBrewer")) {install.packages("RColorBrewer"); require("RColorBrewer")} #color
+if (!require("ggrepel")) {install.packages("ggrepel"); require("ggrepel")}
+if (!require("DESeq2")) {BiocManager::install('DESeq2'); require("DESeq2")}
+if (!require("here")) {install.packages("here"); require("here")}
+
+```
+
+
+# Load Data
+```{r load data, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE}
+
+SO <- readRDS(here("Outputs", "GFPcombined.072824.rds"))
+
+DefaultAssay(SO) <- "RNA"
+Idents(SO) <- "class.Merge"
+
+DimPlot(SO, reduction = "umap")
+
+table(Idents(SO))
+prop.table(table(Idents(SO)))
+
+```
+
+
+```{r echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+################### 1. ------------------------------------------------------------------------------------------------------------
+
+# Shinycell installation
+reqPkg = c("data.table", "Matrix", "hdf5r", "reticulate", "ggplot2", 
+           "gridExtra", "glue", "readr", "RColorBrewer", "R.utils", "Seurat")
+newPkg = reqPkg[!(reqPkg %in% installed.packages()[,"Package"])]
+if(length(newPkg)){install.packages(newPkg)}
+
+# If you are using h5ad file as input, run the code below as well
+# reticulate::py_install("anndata")
+
+#devtools::install_github("SGDDNB/ShinyCell")
+
+
+################### 2. Skip if the seurat object is ready to be loaded directly. --------------------------------------------------
+
+seu <- SO
+
+head(seu@meta.data)
+
+#Confirm active identity of dataset
+
+head(seu@active.ident)
+
+# The down-size step is redundant - as ShinyCell does this automatically. Keeping the following lines here just for the record.
+# Down-size the seurat object by removing the raw counts, keeping the scaled.data, and keeping one assay --------------------------
+# seu <- DietSeurat(seu, counts = FALSE, scale.data = TRUE, dimreducs = "umap", assays = "RNA")
+
+# Below is the DietSeurat() function details.
+# DietSeurat(
+#   object,
+#   counts = TRUE, # Preserve the count matrices for the assays specified
+#   data = TRUE, # Preserve the data slot for the assays specified
+#   scale.data = FALSE, # Preserve the scale.data slot for the assays specified
+#   features = NULL, # Only keep a subset of features, defaults to all features
+#   assays = NULL, # Only keep a subset of assays specified here
+#   dimreducs = NULL, # Only keep a subset of DimReducs specified here (if NULL, remove all DimReducs)
+#   graphs = NULL, # Only keep a subset of Graphs specified here (if NULL, remove all Graphs)
+#   misc = TRUE # Preserve the misc slot; default is TRUE
+# )
+
+# Clean up the meta.data for more user-friendly interface (not required) ----------------------------------------------------------
+
+head(seu@meta.data)
+
+seu$orig.ident <- NULL
+seu$SCT_snn_res.0.8 <- NULL
+seu$integrated_snn_res.3 <- NULL
+seu$SCT_snn_res.3 <- NULL
+
+head(seu@meta.data)
+
+# Rename the columns for easier understanding
+# colnames(seu@meta.data)[colnames(seu@meta.data) == "CellType"] ="Cell Type"
+
+
+# Reorder the columns from important ones as the order will be consistent with the drop-down menu
+colnames(seu@meta.data) # Get all column names
+
+# [1] "nCount_RNA"      "nFeature_RNA"    "nCount_SCT"      "nFeature_SCT"    "seurat_clusters" "Sample"          "class.Merge"    
+
+# Re-order the columns by name
+
+seu@meta.data <- seu@meta.data[, c( "class.Merge", "Sample", "nCount_RNA", "nFeature_RNA", "nCount_SCT",  "nFeature_SCT", "seurat_clusters")]            
+
+colnames(seu@meta.data) # Get all column names
+
+#[1] "class.Merge"     "Sample"          "nCount_RNA"      "nFeature_RNA"    "nCount_SCT"      "nFeature_SCT"    "seurat_clusters"
+
+################### 3.-------------------------------------------------------------------------------------------------------------
+
+# Generate the shiny app
+
+library(Seurat)
+library(ShinyCell)
+
+# seu = readRDS("ALL_DCT_slim.rds") # If the seurat object is ready to be loaded directly, start from this step.
+scConf = createConfig(seu)
+makeShinyApp(seu, scConf, gene.mapping = TRUE, gex.assay = "RNA", default.gene1 = "Pdgfrb", default.gene2 = "Pdgfra",
+             shiny.title = "snRNAseq of Mouse Kidney Stromal Cells",
+       default.multigene = c("Pdgfrb",
+                      "Pdgfra",
+                      "Cryab",
+                      "Top2a",
+                      "Gata3",
+                      "Cspg4",
+                      "Acta2",
+                      "Adra1a",
+                      "Ren1"
+                            )   
+             ) 
+
+```
+
+# Session Info
+```{r sessioninfo, echo=TRUE, warning=FALSE, error=FALSE, message=FALSE, fig.align = 'center'}
+
+sessionInfo()
+```
+
+
+  
